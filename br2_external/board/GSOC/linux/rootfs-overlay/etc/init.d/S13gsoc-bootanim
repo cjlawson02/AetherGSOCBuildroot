@@ -1,0 +1,23 @@
+#!/bin/sh
+# Boot animation, as OpenX6X00's own S00bootanim, once the DRM
+# framebuffer exists.  The panel's power-up order (PH8 after the dot clock, then
+# the backlight) is the kernel's: patch 0003 and the DTS backlight link.
+# x6100-bootanim (BOARD_GSOC: 800x480 logo centred on 1024x600) exits by
+# itself once the GUI creates /tmp/x6100_gui.drm.  No boot CW sound on GSOC.
+
+case "$1" in
+  start)
+    n=0
+    while [ ! -e /dev/fb0 ] && [ "$n" -lt 100 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+    echo 0 >/sys/class/graphics/fbcon/cursor_blink 2>/dev/null
+    # console=tty0 text would keep drawing over the animation.
+    for b in /sys/class/vtconsole/vtcon*/bind; do
+      echo 0 >"$b" 2>/dev/null
+    done
+    /usr/sbin/x6100-bootanim >/dev/null 2>&1 &
+    ;;
+esac
+exit 0

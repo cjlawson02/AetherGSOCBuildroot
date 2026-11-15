@@ -1,0 +1,590 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Xiegu GSOC head unit: Allwinner A20, AXP209, CS4271 codec, 1024x600 RGB
+ * panel, GT911 touch, LM8323 keypad, Si5351 clock generator.
+ *
+ * Replaces the decompiled "drm-f" tree. Semantically equivalent to it
+ * (see equivalence.txt); vendor oddities are kept and marked "vendor:".
+ */
+
+/dts-v1/;
+#include "allwinner/sun7i-a20.dtsi"
+#include "allwinner/sunxi-common-regulators.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pwm/pwm.h>
+
+/ {
+	model = "Xiegu GSOC";
+	compatible = "xiegu,gsoc", "allwinner,sun7i-a20";
+
+	/* mmcN pins mmcblkN: SD must be mmcblk0 (root=/dev/mmcblk0p2), never eMMC */
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc2;
+		mmc2 = &mmc3;
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm 0 50000 PWM_POLARITY_INVERTED>;
+		enable-gpios = <&pio 7 7 GPIO_ACTIVE_HIGH>;		/* PH7 */
+		brightness-levels = <0 10 20 30 40 50 60 70 80 90 100>;
+		default-brightness-level = <10>;
+	};
+
+	hdmi-connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	panel: panel {
+		compatible = "xiegu,gsoc-7inch", "panel-dpi";
+		/* panel-simple lights the backlight after the panel is up (no udev hold) */
+		backlight = <&backlight>;
+		power-supply = <&reg_vcc3v3>;
+		enable-gpios = <&pio 7 8 GPIO_ACTIVE_HIGH>;		/* PH8 */
+
+		panel-timing {
+			clock-frequency = <45000000>;
+			hactive = <1024>;
+			hfront-porch = <16>;
+			hback-porch = <150>;
+			hsync-len = <10>;
+			hsync-active = <0>;
+			vactive = <600>;
+			vfront-porch = <2>;
+			vback-porch = <21>;
+			vsync-len = <2>;
+			vsync-active = <0>;
+			de-active = <1>;
+			pixelclk-active = <1>;
+		};
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&tcon0_out_panel>;
+			};
+		};
+	};
+
+	/* vendor: u-boot hands over a 1024x600 simplefb here; kept disabled */
+	framebuffer@7fda8000 {
+		compatible = "simple-framebuffer";
+		reg = <0x7fda8000 0x258000>;
+		width = <1024>;
+		height = <600>;
+		stride = <4096>;
+		format = "x8r8g8b8";
+		status = "disabled";
+	};
+
+	reserved-memory {
+		/* 128 MiB default CMA; replaces the dtsi 96 MiB default-pool */
+		cma_pool: cma@4a000000 {
+			compatible = "shared-dma-pool";
+			alloc-ranges = <0x4a000000 0x8000000>;
+			size = <0x8000000>;
+			reusable;
+			linux,cma-default;
+		};
+
+		/* u-boot framebuffer, kept out of the kernel's linear map */
+		framebuffer@7fda8000 {
+			reg = <0x7fda8000 0x258000>;
+			no-map;
+		};
+	};
+
+	/* 3.3 V / 5 V rails with no control GPIO */
+	reg_global_3v3: global-v33 {
+		compatible = "regulator-fixed";
+		regulator-name = "global-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		startup-delay-us = <100000>;
+	};
+
+	reg_global_5v0: global-v50 {
+		compatible = "regulator-fixed";
+		regulator-name = "global-5v0";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		startup-delay-us = <100000>;
+	};
+
+	i2s_clk: i2s-clk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24576000>;
+	};
+
+	ref26m_tcxo: ref26M-tcxo {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <26000000>;
+	};
+
+	mmc2_pwrseq: mmc2_pwrseq {
+		compatible = "mmc-pwrseq-emmc";
+		reset-gpios = <&pio 2 24 GPIO_ACTIVE_LOW>;		/* PC24 */
+	};
+
+	/* vendor: probes on its own and drives PH9 (USB Wi-Fi reset), no mmc user */
+	rtl_pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&pio 7 9 GPIO_ACTIVE_LOW>;		/* PH9 */
+	};
+
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "GSOC-Sound-Card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <128>;
+		simple-audio-card,bitclock-master = <&sound_codec>;
+		simple-audio-card,frame-master = <&sound_codec>;
+		simple-audio-card,widgets = "Line", "Line In",
+					    "Line", "Line Out";
+		simple-audio-card,routing = "Line Out", "AOUTA+",
+					    "Line Out", "AOUTA-",
+					    "Line Out", "AOUTB+",
+					    "Line Out", "AOUTB-",
+					    "AINA", "Line In",
+					    "AINB", "Line In";
+
+		sound_codec: simple-audio-card,codec {
+			sound-dai = <&cs4271>;
+			clocks = <&i2s_clk>;
+			system-clock-direction = "out";
+		};
+
+		simple-audio-card,cpu {
+			/* vendor: stray trailing 0 cell, harmless with #sound-dai-cells = 0 */
+			sound-dai = <&i2s0 0>;
+			clocks = <&i2s_clk>;
+		};
+	};
+};
+
+/*
+ * vendor: keep the u-boot-neutralised /chosen stubs (plain compatible, no
+ * pipeline or clocks) so u-boot cannot match and enable them.
+ */
+&{/chosen/framebuffer-lcd0} {
+	compatible = "simple-framebuffer";
+	/delete-property/ allwinner,pipeline;
+	/delete-property/ clocks;
+};
+
+&{/chosen/framebuffer-lcd0-hdmi} {
+	compatible = "simple-framebuffer";
+	/delete-property/ allwinner,pipeline;
+	/delete-property/ clocks;
+};
+
+&{/chosen/framebuffer-lcd0-tve0} {
+	compatible = "simple-framebuffer";
+	/delete-property/ allwinner,pipeline;
+	/delete-property/ clocks;
+};
+
+/delete-node/ &{/reserved-memory/default-pool};
+
+&ahci {
+	target-supply = <&reg_ahci_5v>;
+	status = "okay";
+};
+
+&reg_ahci_5v {
+	status = "okay";
+};
+
+/* vendor: always-on 5 V, no GPIO (PH6 is the PCF8563 interrupt, not VBUS) */
+&reg_usb1_vbus {
+	/delete-property/ gpio;
+	/delete-property/ enable-active-high;
+	regulator-always-on;
+	status = "okay";
+};
+
+&codec {
+	allwinner,audio-routing = "Headphone", "HP",
+				  "Speaker", "LINEOUT",
+				  "LINEIN", "Line In",
+				  "MIC1", "HBIAS",
+				  "MIC1", "Mic1",
+				  "MIC2", "HBIAS",
+				  "MIC2", "Mic2";
+	status = "okay";
+};
+
+&de {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+/*
+ * vendor: keep tcon0 on the plain sun7i-a20-tcon match (no LVDS support, no
+ * "lvds" reset): known good for the RGB panel. The dtsi uses ...-tcon0.
+ */
+&tcon0 {
+	compatible = "allwinner,sun7i-a20-tcon";
+	resets = <&ccu RST_TCON0>;
+	reset-names = "lcd";
+	pinctrl-names = "default";
+	pinctrl-0 = <&lcd_rgb888_pins>;
+	status = "okay";
+};
+
+&tcon0_out {
+	tcon0_out_panel: endpoint@0 {
+		reg = <0>;
+		remote-endpoint = <&panel_in>;
+	};
+};
+
+&mali {
+	memory-region = <&cma_pool>;
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	axp209: pmic@34 {
+		reg = <0x34>;
+		interrupt-parent = <&nmi_intc>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+	};
+};
+
+#include "allwinner/axp209.dtsi"
+
+/* not in the vendor tree: no AXP temperature hwmon */
+/delete-node/ &{/pmic-temp};
+
+&ac_power_supply {
+	status = "okay";
+};
+
+&reg_dcdc2 {
+	regulator-always-on;
+	regulator-min-microvolt = <1000000>;
+	regulator-max-microvolt = <1450000>;
+	regulator-name = "vdd-cpu";
+};
+
+&reg_dcdc3 {
+	regulator-always-on;
+	regulator-min-microvolt = <1000000>;
+	regulator-max-microvolt = <1400000>;
+	regulator-name = "vdd-int-dll";
+};
+
+&reg_ldo1 {
+	regulator-name = "vdd-rtc";
+};
+
+&reg_ldo2 {
+	regulator-always-on;
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-name = "avcc";
+};
+
+&reg_ldo3 {
+	regulator-always-on;
+	regulator-min-microvolt = <2800000>;
+	regulator-max-microvolt = <2800000>;
+	regulator-name = "csi0-io";
+};
+
+&i2c1 {
+	status = "okay";
+
+	rtc@51 {
+		compatible = "nxp,pcf8563";
+		reg = <0x51>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 6 IRQ_TYPE_EDGE_FALLING>;	/* PH6 */
+		interrupt-names = "irq";
+		irq-gpios = <&pio 7 6 GPIO_ACTIVE_HIGH>;
+	};
+
+	keypad@42 {
+		compatible = "ti,lm8323";
+		reg = <0x42>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 3 IRQ_TYPE_EDGE_FALLING>;	/* PH3 */
+		interrupt-names = "irq";
+		irq-gpios = <&pio 7 3 GPIO_ACTIVE_HIGH>;
+		size_x = <4>;
+		size_y = <4>;
+		debounce_time = <2>;
+		active_time = <1000>;
+	};
+};
+
+&i2c2 {
+	status = "okay";
+
+	touchscreen@5d {
+		compatible = "goodix,gt911";
+		reg = <0x5d>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 2 IRQ_TYPE_EDGE_FALLING>;	/* PH2 */
+		interrupt-names = "irq";
+		irq-gpios = <&pio 7 2 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&pio 7 25 GPIO_ACTIVE_HIGH>;	/* PH25 */
+		gt911,cfg-data = [00 00 04 58 02 05 3d 20 01 08 28 05 50 32 03 05 00 00 00 00 00 00 05 17 19 1c 14 87 29 0a 19 1b d6 07 00 00 00 01 03 10 00 01 00 00 00 03 64 32 00 00 00 0f 2d 94 c5 02 07 00 00 04 c0 10 00 9c 14 00 7b 1a 00 66 20 00 54 28 00 54 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 02 04 06 08 0a 0c 0e 10 12 14 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 00 02 04 06 08 0a 0c 1d 1e 1f 20 21 22 24 26 28 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff bb 01];
+	};
+};
+
+&i2c3 {
+	status = "okay";
+
+	si5351: clock-generator@60 {
+		compatible = "silabs,si5351a-msop";
+		reg = <0x60>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#clock-cells = <1>;
+		clock-names = "xtal";
+		clocks = <&ref26m_tcxo>;
+		silabs,pll-source = <0 0>, <1 0>;
+
+		clkout0 {
+			reg = <0>;
+			silabs,clock-source = <0>;
+			silabs,drive-strength = <2>;
+			silabs,multisynth-source = <0>;
+			silabs,pll-master;
+			clock-frequency = <140909800>;
+		};
+
+		clkout1 {
+			reg = <1>;
+			silabs,clock-source = <1>;
+		};
+
+		clkout2 {
+			reg = <2>;
+			silabs,clock-source = <0>;
+			silabs,drive-strength = <2>;
+			silabs,multisynth-source = <1>;
+			silabs,pll-master;
+			clock-frequency = <25600000>;
+		};
+	};
+
+	cs4271: codec@10 {
+		compatible = "cirrus,cs4271";
+		reg = <0x10>;
+		#sound-dai-cells = <0>;
+		reset-gpio = <&pio 8 2 GPIO_ACTIVE_LOW>;	/* PI2 */
+		va-supply = <&reg_global_5v0>;
+		vd-supply = <&reg_global_3v3>;
+		vl-supply = <&reg_global_3v3>;
+		amutec-eq-bmutec = <0>;
+		enable-soft-reset = <1>;
+	};
+};
+
+&i2s0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s0_pins>;
+	status = "okay";
+};
+
+&ir0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&ir0_rx_pin>;
+	status = "okay";
+};
+
+&lradc {
+	vref-supply = <&reg_vcc3v0>;
+	status = "okay";
+
+	button-191 {
+		label = "Volume Up";
+		linux,code = <KEY_VOLUMEUP>;
+		channel = <0>;
+		voltage = <191274>;
+	};
+
+	button-392 {
+		label = "Volume Down";
+		linux,code = <KEY_VOLUMEDOWN>;
+		channel = <0>;
+		voltage = <392644>;
+	};
+
+	button-601 {
+		label = "Menu";
+		linux,code = <KEY_MENU>;
+		channel = <0>;
+		voltage = <601151>;
+	};
+
+	button-795 {
+		label = "Search";
+		linux,code = <KEY_SEARCH>;
+		channel = <0>;
+		voltage = <795090>;
+	};
+
+	button-987 {
+		label = "Home";
+		linux,code = <KEY_HOMEPAGE>;
+		channel = <0>;
+		voltage = <987387>;
+	};
+
+	button-1184 {
+		label = "Esc";
+		linux,code = <KEY_ESC>;
+		channel = <0>;
+		voltage = <1184678>;
+	};
+
+	button-1398 {
+		label = "Enter";
+		linux,code = <KEY_ENTER>;
+		channel = <0>;
+		voltage = <1398804>;
+	};
+};
+
+/* SD card slot */
+&mmc0 {
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <4>;
+	cd-gpios = <&pio 4 0 GPIO_ACTIVE_LOW>;			/* PE0 */
+	status = "okay";
+};
+
+/* on-board eMMC */
+&mmc2 {
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <4>;
+	non-removable;
+	mmc-pwrseq = <&mmc2_pwrseq>;
+	reset-gpios = <&pio 2 24 GPIO_ACTIVE_LOW>;		/* PC24 */
+	status = "okay";
+
+	emmc@0 {
+		compatible = "mmc-card";
+		reg = <0>;
+		broken-hpi;
+	};
+};
+
+/* AP6210 SDIO footprint unpopulated: controller stays disabled */
+&mmc3 {
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <4>;
+	non-removable;
+	status = "disabled";
+
+	wifi@1 {
+		compatible = "brcm,bcm4329-fmac";
+		reg = <1>;
+		interrupt-parent = <&pio>;
+		interrupts = <7 10 IRQ_TYPE_LEVEL_LOW>;		/* PH10 */
+		interrupt-names = "host-wake";
+	};
+};
+
+&otg_sram {
+	status = "okay";
+};
+
+&pio {
+	/* I2S0 BCLK/LRCK/DO/DI; PB5 (MCLK) left unmuxed as in the vendor tree */
+	i2s0_pins: i2s0-pins {
+		pins = "PB6", "PB7", "PB8", "PB12";
+		function = "i2s0";
+	};
+
+	lcd_rgb888_pins: lcd-rgb888-pins {
+		pins = "PD0", "PD1", "PD2", "PD3", "PD4", "PD5", "PD6",
+		       "PD7", "PD8", "PD9", "PD10", "PD11", "PD12", "PD13",
+		       "PD14", "PD15", "PD16", "PD17", "PD18", "PD19",
+		       "PD20", "PD21", "PD22", "PD23", "PD24", "PD25",
+		       "PD26", "PD27";
+		function = "lcd0";
+	};
+};
+
+&pwm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm0_pin>, <&pwm1_pin>;
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pb_pins>;
+	status = "okay";
+};
+
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_ph_pins>;
+	status = "okay";
+};
+
+&usb_otg {
+	extcon = <&usbphy 0>;
+	status = "okay";
+};
+
+&usbphy {
+	usb0_id_det-gpios = <&pio 7 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;	/* PH4 */
+	usb0_vbus_det-gpios = <&pio 7 17 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;	/* PH17 */
+	usb0_vbus-supply = <&reg_global_5v0>;
+	usb1_vbus-supply = <&reg_global_5v0>;
+	usb2_vbus-supply = <&reg_global_5v0>;
+	status = "okay";
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ohci0 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};

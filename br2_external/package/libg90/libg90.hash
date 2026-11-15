@@ -1,0 +1,3 @@
+# Computed locally from the pinned commit via Buildroot 2025.02's reproducible git (-git4) tarball.
+sha256  cc4853a623e08266104497b1cedaeccafee080bb78fd8d9bce45dccace3cdc87  libg90-4eefd6e9fa43c554c1de502c2b3d2ed6b08d6f39-git4.tar.gz
+sha256  e2d62267788cc670a2aafcda65b657b27c4326da3aa7dce846eab3427fa6886d  LICENSE

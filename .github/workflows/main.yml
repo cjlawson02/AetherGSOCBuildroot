@@ -1,4 +1,4 @@
-name: Build image
+name: Build GSOC image
 on:
   workflow_dispatch:
   push:
@@ -37,22 +37,22 @@ jobs:
       run: |
         cd build && make
 
-    # Compress image
-    - name: Compress image
+    # Collect payloads
+    - name: Collect payloads
       run: |
         cd build/images
-        zip sdcard.img.zip sdcard.img
+        zip gsoc-payloads.zip zImage sun7i-a20-xiegu-gsoc.dtb boot.scr boot.vfat rootfs.ext4
 
-    # Upload image
-    - name: 'Upload image'
+    # Upload payloads
+    - name: 'Upload payloads'
       uses: actions/upload-artifact@v4
       with:
-        name: sdcard.img
-        path: build/images/sdcard.img
+        name: gsoc-payloads
+        path: build/images/gsoc-payloads.zip
 
     # Create release
     - name: Release
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: build/images/sdcard.img.zip
+        files: build/images/gsoc-payloads.zip

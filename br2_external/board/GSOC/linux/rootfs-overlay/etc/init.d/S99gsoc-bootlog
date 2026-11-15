@@ -1,0 +1,34 @@
+#!/bin/sh
+# Snapshot of the booted system 45 s after init, next to S03gsoc-bootcard's
+# early log on GSOC-BOOT (/boot/gsoc-log/boot<N>-late.txt).
+
+LOGDIR=/boot/gsoc-log
+
+snapshot() {
+  sleep 45
+  n=$(cat /run/gsoc-boot-n 2>/dev/null || echo x)
+  {
+    date
+    echo "== dmesg";   dmesg
+    echo "== lsmod";   lsmod
+    echo "== asound";  cat /proc/asound/cards
+    echo "== drm";     ls /sys/class/drm; cat /sys/class/drm/*/status; cat /proc/fb
+    echo "== ps";      ps
+    echo "== ip";      ip addr
+    echo "== nmcli";   timeout 10 nmcli -t device
+    echo "== pulse"
+    export PULSE_SERVER=unix:/run/pulse/native
+    timeout 10 pactl info
+    timeout 10 pactl list short sinks
+    timeout 10 pactl list short sources
+    echo "== syslog";  cat /var/log/messages
+  } >"$LOGDIR/boot$n-late.txt" 2>&1
+  sync
+}
+
+case "$1" in
+  start)
+    grep -q ' /boot ' /proc/mounts || exit 0
+    snapshot &
+    ;;
+esac

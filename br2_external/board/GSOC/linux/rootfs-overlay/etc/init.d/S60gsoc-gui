@@ -1,0 +1,72 @@
+#!/bin/sh
+# BusyBox init, deliberately not a systemd unit. Keep the radio policy in one
+# visible place until G18 validates real card ordering and device ownership.
+
+GUI=/usr/sbin/x6100_gui
+PIDFILE=/run/gsoc-gui.pid
+LOGFILE=/var/log/gsoc-gui.log
+
+running() {
+  [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+stop_gui() {
+  if running; then
+    start-stop-daemon -K -q -p "$PIDFILE" -x "$GUI" || true
+    n=0
+    while running && [ "$n" -lt 50 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+  fi
+  rm -f "$PIDFILE"
+}
+
+case "$1" in
+  start)
+    export PULSE_SERVER=unix:/run/pulse/native
+    export G90_DEV=/dev/ttyS1
+    export G90_PROFILE=auto
+    export G90_ALLOW_TX=1
+    export G90_FUSE_IQ=1
+    # Mic1 -> codec mixer -> speaker in the analog domain (no Pulse loopback, 8-17 % of a core)
+    # and the IQ capture by mmap (one wakeup per FFT): docs/subsystems/performance.md in gsoc-open.
+    # gui.env can set either back to 0.
+    export G90_AF_ANALOG=1
+    export G90_IQ_MMAP=1
+    n=0
+    while [ ! -S /run/pulse/native ] && [ "$n" -lt 50 ]; do
+      sleep 0.1
+      n=$((n + 1))
+    done
+    [ -S /run/pulse/native ] || exit 1
+    running && exit 0
+    # boot.scr puts the kernel console on the panel (console=tty0) for
+    # UART-less first boots; release fbcon so it cannot draw over the GUI.
+    for b in /sys/class/vtconsole/vtcon*/bind; do
+      echo 0 >"$b" 2>/dev/null
+    done
+    # As OpenX6X00's own launchers: panel skins in /dev/shm, a params.db seed.
+    cp -R /usr/share/x6100/images /dev/shm/
+    [ -f /mnt/params.db ] || cp /usr/share/x6100/params.default.db /mnt/params.db
+    # GSOC-BOOT overrides for board A/Bs without a reflash, e.g.
+    # DRM_CARD=/nonexistent forces fbdev instead of DRM planes.
+    if [ -f /boot/gsoc/gui.env ]; then
+      set -a
+      . /boot/gsoc/gui.env
+      set +a
+    fi
+    if grep -q ' /boot ' /proc/mounts; then
+      LOGFILE=/boot/gsoc-log/gui$(cat /run/gsoc-boot-n 2>/dev/null).txt
+    fi
+    rm -f "$PIDFILE"
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x /bin/sh -- -c "exec $GUI >>$LOGFILE 2>&1"
+    ;;
+  stop)
+    stop_gui
+    ;;
+  restart)
+    stop_gui
+    "$0" start
+    ;;
+esac

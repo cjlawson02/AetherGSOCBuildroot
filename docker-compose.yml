@@ -9,7 +9,6 @@ services:
       - .:/workspace:cached
       - vscode_server:/root/.vscode-server
       - build_output:/workspace/build
-      - buildroot_dir:/workspace/buildroot-2022.11
       - buildroot_cache:/root/.buildroot-ccache
     restart: always
     logging:
@@ -21,5 +20,4 @@ services:
 volumes:
   vscode_server:
   build_output:
-  buildroot_dir:
   buildroot_cache:

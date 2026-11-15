@@ -1,0 +1,4 @@
+# Computed locally from the pinned commit via Buildroot 2025.02's reproducible git (-git4)
+# tarball; the GUI's commit (gsoc-gui.hash has the same commit's tarball with submodules).
+sha256  32be19ae5d6b9619d374e037325bbb68470f320276fb3f4985150af0da7558db  gsoc-webserver-7d1aadadba0d85e21fadbbedc3575b73841894cc-git4.tar.gz
+sha256  20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331  webserver/LICENSE

@@ -1,0 +1,15 @@
+#!/bin/sh
+# BusyBox init has no systemd-modules-load: load /etc/modules-load.d/*.conf in
+# file and line order, after udev coldplug (S10udevd). Only loads: unlike
+# initscripts' S11modules (removed in post-build.sh), nothing is unloaded at shutdown.
+
+case "$1" in
+  start)
+    for conf in /etc/modules-load.d/*.conf; do
+      [ -f "$conf" ] || continue
+      sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$conf" | while read -r mod; do
+        [ -n "$mod" ] && modprobe "$mod"
+      done
+    done
+    ;;
+esac

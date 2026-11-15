@@ -1,0 +1,5 @@
+config BR2_PACKAGE_LIBG90
+	bool "libg90"
+	depends on BR2_INSTALL_LIBSTDCPP
+	help
+	  Pinned G90 DE-9 protocol codec and wire library for the GSOC GUI.

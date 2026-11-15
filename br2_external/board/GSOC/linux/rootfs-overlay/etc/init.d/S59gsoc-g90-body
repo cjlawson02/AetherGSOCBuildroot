@@ -1,0 +1,25 @@
+#!/bin/sh
+# On a power-key poweroff (flag from S14gsoc-powerkey), ask the G90 body to
+# shut down too, so the DE-9 +8 V drops: head byte 37 bit 0x80 (shutdown_req)
+# for 1.5 s at 50 ms, then one frame with it clear.  Port of the leave
+# system's g90-body-shutdown.service.  rcK stops S60gsoc-gui first, so the
+# GUI has released ttyS1.  Plain reboots leave the body alone.
+
+DEV=/dev/ttyS1
+FRAMES=/usr/share/gsoc
+
+case "$1" in
+  stop)
+    [ -f /run/gsoc-poweroff ] || exit 0
+    stty -F "$DEV" 115200 raw -echo cs8 -cstopb -parenb clocal cread || exit 0
+    n=0
+    while [ "$n" -lt 30 ]; do
+      cat "$FRAMES/g90-shutdown-frame.bin" >"$DEV"
+      sleep 0.05
+      n=$((n + 1))
+    done
+    cat "$FRAMES/g90-clear-frame.bin" >"$DEV"
+    logger -t gsoc-g90-body "body shutdown_req sent"
+    ;;
+esac
+exit 0

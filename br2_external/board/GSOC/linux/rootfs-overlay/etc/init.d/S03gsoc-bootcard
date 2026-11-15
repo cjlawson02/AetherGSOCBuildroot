@@ -1,0 +1,48 @@
+#!/bin/sh
+# First boots without a UART: GSOC-BOOT (p1) is mounted at /boot.  Imports an
+# SSH key and NetworkManager profiles dropped into /boot/gsoc/ from a PC, and
+# writes boot logs to /boot/gsoc-log/ for reading on a PC after power-off.
+
+BOOTDEV=/dev/mmcblk0p1
+LOGDIR=/boot/gsoc-log
+NMDIR=/etc/NetworkManager/system-connections
+
+case "$1" in
+  start)
+    mkdir -p /boot
+    grep -q ' /boot ' /proc/mounts || mount -t vfat -o rw,noatime "$BOOTDEV" /boot || exit 0
+
+    if [ -s /boot/gsoc/authorized_keys ]; then
+      mkdir -p /root/.ssh
+      chmod 700 /root/.ssh
+      cp /boot/gsoc/authorized_keys /root/.ssh/authorized_keys
+      chmod 600 /root/.ssh/authorized_keys
+    fi
+    for c in /boot/gsoc/*.nmconnection; do
+      [ -f "$c" ] || continue
+      mkdir -p "$NMDIR"
+      cp "$c" "$NMDIR/"
+      chmod 600 "$NMDIR/${c##*/}"
+    done
+
+    mkdir -p "$LOGDIR"
+    n=$(( $(cat "$LOGDIR/count" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" >"$LOGDIR/count"
+    echo "$n" >/run/gsoc-boot-n
+    { date; uname -a; cat /proc/cmdline; echo; dmesg; } >"$LOGDIR/boot$n-early.txt" 2>&1
+    sync
+    ;;
+  stop)
+    # Late in the shutdown (S60's GUI stopped, its log on /boot closed): /boot clean
+    # before init's "umount -a -r", which gave up on it while the GUI was still exiting
+    # (FAT left dirty: "Volume was not properly unmounted").
+    grep -q ' /boot ' /proc/mounts || exit 0
+    sync
+    n=0
+    while ! umount /boot 2>/dev/null; do
+      n=$((n + 1))
+      [ "$n" -ge 20 ] && { mount -o remount,ro /boot; break; }
+      sleep 0.25
+    done
+    ;;
+esac

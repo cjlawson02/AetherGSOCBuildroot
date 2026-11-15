@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Xiegu GSOC, U-Boot's own device tree: console, SD card, PMIC.  Linux uses
+ * board/GSOC/dts/sun7i-a20-xiegu-gsoc.dts; the name matches so U-Boot's
+ * default fdtfile is that DTB.
+ *
+ * Left out on purpose: the eMMC (mmc2), so U-Boot cannot touch the stock
+ * Xiegu system; PB8, which is I2S0 here but AHCI power on the Cubieboard2.
+ * The panel console comes from Kconfig (VIDEO_LCD_*), not from this tree.
+ */
+
+/dts-v1/;
+#include "sun7i-a20.dtsi"
+#include "sunxi-common-regulators.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	model = "Xiegu GSOC";
+	compatible = "xiegu,gsoc", "allwinner,sun7i-a20";
+
+	aliases {
+		mmc0 = &mmc0;
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+};
+
+&i2c0 {
+	status = "okay";
+
+	axp209: pmic@34 {
+		reg = <0x34>;
+		interrupt-parent = <&nmi_intc>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+	};
+};
+
+#include "axp209.dtsi"
+
+&mmc0 {
+	vmmc-supply = <&reg_vcc3v3>;
+	bus-width = <4>;
+	cd-gpios = <&pio 4 0 GPIO_ACTIVE_LOW>;			/* PE0 */
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pb_pins>;
+	status = "okay";
+};

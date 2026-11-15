@@ -1,0 +1,118 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GSOC Open <gsoc-open@local>
+Subject: [PATCH] drm/panel: simple: add Xiegu GSOC 7" panel, delay enable GPIO
+
+The Xiegu GSOC head panel has an LVDS serialiser whose power-down pin (PH8,
+the panel enable GPIO) must rise only after the dot clock is stable. If it
+rises early the serialiser locks misaligned (wrong colours, no red, vertical
+streaks) until PD is pulsed low again. The DT bound the generic "panel-dpi"
+path, which has no delays, and a boot script pulsed PH8 from userspace; that
+raced on a cold power-on.
+
+sun4i_crtc_atomic_enable() starts the TCON and dot clock before
+sun4i_rgb_encoder_enable() calls drm_panel_prepare(), so waiting inside
+panel_simple_resume() before asserting the enable GPIO gives the clock time
+to settle.
+
+- Add a generic panel_desc.delay.pre_enable_gpio: msleep() after the supply
+  is on and before the enable GPIO is asserted.
+- Add a descriptor for "xiegu,gsoc-7inch" with timings identical to what
+  panel-dpi derived from the DT panel-timing node (1024x600, 45 MHz,
+  HSYNC/VSYNC low, DE high, pixel data driven on the rising edge),
+  bpc 6, RGB666_1X18, DPI connector, and pre_enable_gpio = 1000 ms
+  (100 ms still locked misaligned on 2 of 2 cold power-ons; 1000 ms came
+  up clean; the backlight stays off until later in boot, so it is not seen).
+  The DT compatible "xiegu,gsoc-7inch", "panel-dpi" matches this entry first.
+  The DT panel-timing node is still parsed as an override and selects the
+  same mode.
+
+The enable GPIO is still requested GPIOD_OUT_LOW at probe.
+Board evidence: gsoc-open docs/NEEDS-HARDWARE.md, measured 2026-11-07/08.
+
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -89,6 +89,16 @@
+ 	/** @delay: Structure containing various delay values for this panel. */
+ 	struct {
+ 		/**
++		 * @delay.pre_enable_gpio: Wait before asserting the enable GPIO.
++		 *
++		 * The time (in milliseconds) to wait, after the supply is on
++		 * and before the enable GPIO is asserted. Lets the upstream
++		 * video clock run for a while before the panel's receiver is
++		 * powered up.
++		 */
++		unsigned int pre_enable_gpio;
++
++		/**
+ 		 * @delay.prepare: Time for the panel to become ready.
+ 		 *
+ 		 * The time (in milliseconds) that it takes for the panel to
+@@ -341,6 +351,9 @@
+ 		return err;
+ 	}
+ 
++	if (p->desc->delay.pre_enable_gpio)
++		msleep(p->desc->delay.pre_enable_gpio);
++
+ 	gpiod_set_value_cansleep(p->enable_gpio, 1);
+ 
+ 	if (p->desc->delay.prepare)
+@@ -4935,6 +4948,44 @@
+ 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
+ };
+ 
++/*
++ * Xiegu GSOC 7" head panel (LVDS serialiser behind the A20 TCON0 RGB output).
++ * Same mode and flags the DT "panel-dpi" fallback derived from panel-timing.
++ */
++static const struct display_timing xiegu_gsoc_7inch_timing = {
++	.pixelclock = { 45000000, 45000000, 45000000 },
++	.hactive = { 1024, 1024, 1024 },
++	.hfront_porch = { 16, 16, 16 },
++	.hback_porch = { 150, 150, 150 },
++	.hsync_len = { 10, 10, 10 },
++	.vactive = { 600, 600, 600 },
++	.vfront_porch = { 2, 2, 2 },
++	.vback_porch = { 21, 21, 21 },
++	.vsync_len = { 2, 2, 2 },
++	.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
++		 DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE,
++};
++
++static const struct panel_desc xiegu_gsoc_7inch = {
++	.timings = &xiegu_gsoc_7inch_timing,
++	.num_timings = 1,
++	.bpc = 6,
++	.delay = {
++		/*
++		 * The panel's LVDS serialiser locks misaligned (wrong colours,
++		 * vertical streaks) if its power-down (enable GPIO) rises
++		 * before the dot clock has settled. The CRTC starts the TCON
++		 * before the encoder calls prepare, so this wait is dot clock
++		 * run time. 100 ms was not enough on a cold power-on, 1000 ms
++		 * was (board traces 2026-11-08).
++		 */
++		.pre_enable_gpio = 1000,
++	},
++	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
++	.bus_flags = DRM_BUS_FLAG_DE_HIGH | DRM_BUS_FLAG_PIXDATA_DRIVE_POSEDGE,
++	.connector_type = DRM_MODE_CONNECTOR_DPI,
++};
++
+ static const struct drm_display_mode mchp_ac69t88a_mode = {
+ 	.clock = 25000,
+ 	.hdisplay = 800,
+@@ -5483,6 +5534,9 @@
+ 		.compatible = "microchip,ac69t88a",
+ 		.data = &mchp_ac69t88a,
+ 	}, {
++		.compatible = "xiegu,gsoc-7inch",
++		.data = &xiegu_gsoc_7inch,
++	}, {
+ 		/* Must be the last entry */
+ 		.compatible = "panel-dpi",
+ 
+-- 
+2.40.5
+

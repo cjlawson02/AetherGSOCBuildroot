@@ -1,0 +1,4 @@
+# Keep the CS4271 simple-card out of PulseAudio: OpenX6X00 opens hw:1,0 at
+# 192 kHz directly when G90_FUSE_IQ=1.  ALSA drops the dashes from the DT name
+# "GSOC-Sound-Card"; matching the wrong id let Pulse grab hw:1,0 and loop.
+SUBSYSTEM=="sound", KERNEL=="card*", ATTR{id}=="GSOCSoundCard", ENV{PULSE_IGNORE}="1"

@@ -1,0 +1,122 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GSOC Open <gsoc-open@local>
+Subject: [PATCH] input: keyboard: lm8323: GSOC keypad handoff deltas
+
+Xiegu GSOC front-panel LM8323 on sunxi current.
+The series directory is not part of the patch. gsoc-lm8323.sh copies this
+file into userpatches/kernel/archive/sunxi-${KERNEL_MAJOR_MINOR} at build time.
+
+- Static vendor 8x12 keymap platform_data fallback when DT has no pdata
+- of_match_table for "ti,lm8323" (DT probe on I2C1 @0x42)
+- IRQF_ONESHOT only (sunxi 6.18 PH3 edge domain; stock 5.4 used
+  IRQF_TRIGGER_LOW | IRQF_ONESHOT and that irqchip accepted level)
+- Probe sequence itself is stock: RESET, wait for INT_NOINIT, WRITE_CLOCK 0x0b
+
+Source: tools/gsoc-lm8323/oot/lm8323.c vs linux v6.18 mainline.
+---
+--- a/drivers/input/keyboard/lm8323.c
++++ b/drivers/input/keyboard/lm8323.c
+@@ -18,11 +18,35 @@
+ #include <linux/delay.h>
+ #include <linux/input.h>
+ #include <linux/leds.h>
++#include <linux/of.h>
+ #include <linux/platform_data/lm8323.h>
+ #include <linux/pm.h>
+ #include <linux/slab.h>
+ #include <linux/string_choices.h>
+ 
++/*
++ * GSOC / Xiegu vendor fallback — stock 5.4 prints
++ * "no platform data avaliable,use static table" then "init_pwm ok".
++ * Mainline has no DT pdata; Armbian CONFIG_KEYBOARD_LM8323=n.
++ * Keymap from docs/hardware/data/lm8323-vendor-static-keymap.json
++ * (extracted from stock uImage). Prefer 8x12 over DT's wrong 4x4.
++ */
++static unsigned short gsoc_lm8323_keymap[LM8323_KEYMAP_SIZE] = {
++	0, 228, 229, 230, 231, 232, 233, 183, 184, 185, 186, 187, 115, 114, 188, 189,
++	190, 103, 108, 191, 192, 110, 111, 147, 104, 109, 102, 107, 59, 60, 61, 62,
++	63, 28, 14, 52, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 164, 29,
++};
++
++static struct lm8323_platform_data gsoc_lm8323_pdata = {
++	.debounce_time = 3,
++	.active_time = 500,
++	.size_x = 8,
++	.size_y = 12,
++	.repeat = false,
++	.keymap = gsoc_lm8323_keymap,
++	.name = "LM8323 Keyboard",
++};
++
+ /* Commands to send to the chip. */
+ #define LM8323_CMD_READ_ID		0x80 /* Read chip ID. */
+ #define LM8323_CMD_WRITE_CFG		0x81 /* Set configuration item. */
+@@ -629,8 +653,10 @@
+ 	u8 data[2];
+ 
+ 	if (!pdata || !pdata->size_x || !pdata->size_y) {
+-		dev_err(&client->dev, "missing platform_data\n");
+-		return -EINVAL;
++		/* Match stock vendor wording for dmesg greps. */
++		dev_info(&client->dev,
++			 "no platform data avaliable,use static table\n");
++		pdata = &gsoc_lm8323_pdata;
+ 	}
+ 
+ 	if (pdata->size_x > 8) {
+@@ -699,6 +725,7 @@
+ 		if (err)
+ 			return err;
+ 	}
++	dev_info(&client->dev, "init_pwm ok\n");
+ 
+ 	lm->kp_enabled = true;
+ 
+@@ -724,9 +751,14 @@
+ 		return err;
+ 	}
+ 
++	/*
++	 * Mainline uses IRQF_TRIGGER_LOW. Sunxi pio-edge domains (PH3 on
++	 * GSOC) only support edge; forcing LEVEL → -EIO from
++	 * gpiochip_irq_reqres. Honor DT (EDGE_FALLING) + ONESHOT.
++	 */
+ 	err = devm_request_threaded_irq(&client->dev, client->irq,
+ 					NULL, lm8323_irq,
+-					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
++					IRQF_ONESHOT,
+ 					"lm8323", lm);
+ 	if (err) {
+ 		dev_err(&client->dev, "could not get IRQ %d\n", client->irq);
+@@ -791,17 +823,26 @@
+ 	{ "lm8323" },
+ 	{ }
+ };
++MODULE_DEVICE_TABLE(i2c, lm8323_id);
+ 
++#ifdef CONFIG_OF
++static const struct of_device_id lm8323_of_match[] = {
++	{ .compatible = "ti,lm8323" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, lm8323_of_match);
++#endif
++
+ static struct i2c_driver lm8323_i2c_driver = {
+ 	.driver = {
+ 		.name		= "lm8323",
+ 		.pm		= pm_sleep_ptr(&lm8323_pm_ops),
+ 		.dev_groups	= lm8323_groups,
++		.of_match_table	= of_match_ptr(lm8323_of_match),
+ 	},
+ 	.probe		= lm8323_probe,
+ 	.id_table	= lm8323_id,
+ };
+-MODULE_DEVICE_TABLE(i2c, lm8323_id);
+ 
+ module_i2c_driver(lm8323_i2c_driver);
+ 
+
+-- 
+2.40.5

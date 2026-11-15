@@ -1,0 +1,8 @@
+# Udev enumerates the card-0 sun4i codec first, so it is the system default.
+# G18 verifies its concrete Pulse name.  g90_local_af.c selects the proven Mic1
+# source/cabinet sink and owns loopback gain (VOL 0..600%).  Do not create an
+# alsaloop here: it would steal the direct 192 kHz IQ device.
+
+# Card 0 stays open as before: the cabinet AF is the codec's analog Mic1 -> PA
+# route, which must not power down with an idle sink.
+unload-module module-suspend-on-idle

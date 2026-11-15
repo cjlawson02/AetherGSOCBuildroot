@@ -1,0 +1,10 @@
+config BR2_PACKAGE_GSOC_WEBSERVER
+	bool "OpenX6X00 web configurator"
+	depends on BR2_PACKAGE_GSOC_GUI
+	select BR2_PACKAGE_PYTHON3
+	select BR2_PACKAGE_PYTHON_BOTTLE
+	select BR2_PACKAGE_PYTHON3_SQLITE
+	select BR2_PACKAGE_PYTHON_BOTTLE_SQLITE
+	help
+	  The web configurator of OpenX6X00 (webserver/ of the GUI's tree,
+	  at the GUI's commit), on port 80 and 443.

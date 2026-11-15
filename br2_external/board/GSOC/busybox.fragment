@@ -1,0 +1,3 @@
+# Linux >= 6.8 uapi headers dropped CBQ; BusyBox 1.36 tc needs it.
+# CONFIG_TC is not set
+CONFIG_TIMEOUT=y

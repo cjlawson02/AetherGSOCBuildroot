@@ -1,0 +1,71 @@
+From: GSOC Open <gsoc-open@local>
+Subject: [PATCH] ASoC: cs4271: wait for the crystal after reset (GSOC)
+
+On the Xiegu GSOC the in-tree 1 ms wait after releasing nRESET is too short:
+the CS4271 control port NACKs (-ENXIO on regcache_sync) until its crystal has
+started, and simple-card never creates the sound card.  Wait 50 ms, and retry
+the first real writes (cache marked dirty) while the crystal starts.
+Board evidence: gsoc-open docs/NEEDS-HARDWARE.md G11, tools/gsoc-cs4271/.
+
+--- a/sound/soc/codecs/cs4271.c
++++ b/sound/soc/codecs/cs4271.c
+@@ -487,7 +487,9 @@
+ 	gpiod_direction_output(cs4271->reset, 1);
+ 	mdelay(1);
+ 	gpiod_set_value(cs4271->reset, 0);
+-	mdelay(1);
++	/* The 1 ms wait stops the crystal and does not let it start again.
++	 * The control port NACKs until that clock is up. */
++	msleep(50);
+ 
+ 	return 0;
+ }
+@@ -576,20 +578,37 @@
+ 		cs4271->enable_soft_reset = cs4271plat->enable_soft_reset;
+ 	}
+ 
+-	/* Reset codec */
++	/* Reset once. A second pulse restarts the crystal wait.
++	 * A fresh cache is clean, so regcache_sync writes nothing and the
++	 * first real I2C access is easy to miss. Mark it dirty and retry
++	 * that write while the crystal starts. */
+ 	cs4271_reset(component);
+ 
+-	ret = regcache_sync(cs4271->regmap);
+-	if (ret < 0)
+-		goto err_disable_regulator;
++	{
++		int attempt;
+ 
+-	ret = regmap_update_bits(cs4271->regmap, CS4271_MODE2,
+-				 CS4271_MODE2_PDN | CS4271_MODE2_CPEN,
+-				 CS4271_MODE2_PDN | CS4271_MODE2_CPEN);
+-	if (ret < 0)
+-		goto err_disable_regulator;
+-	ret = regmap_update_bits(cs4271->regmap, CS4271_MODE2,
+-				 CS4271_MODE2_PDN, 0);
++		ret = -EIO;
++		for (attempt = 0; attempt < 10; attempt++) {
++			if (attempt)
++				msleep(50 * attempt);
++			regcache_mark_dirty(cs4271->regmap);
++			ret = regcache_sync(cs4271->regmap);
++			if (ret)
++				goto try_again;
++			ret = regmap_update_bits(cs4271->regmap, CS4271_MODE2,
++						 CS4271_MODE2_PDN | CS4271_MODE2_CPEN,
++						 CS4271_MODE2_PDN | CS4271_MODE2_CPEN);
++			if (ret)
++				goto try_again;
++			ret = regmap_update_bits(cs4271->regmap, CS4271_MODE2,
++						 CS4271_MODE2_PDN, 0);
++			if (!ret)
++				break;
++try_again:
++			dev_warn(component->dev, "control port failed (%d), try %d\n",
++				 ret, attempt + 1);
++		}
++	}
+ 	if (ret < 0)
+ 		goto err_disable_regulator;
+ 	/* Power-up sequence requires 85 uS */

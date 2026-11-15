@@ -1,0 +1,11 @@
+#!/bin/sh
+# The kernel sets the clock from rtc0, the A20's own RTC, which has no backup
+# cell and reads 1970.  The battery-backed PCF8563 is rtc1: take the time from
+# it once S02rtc has cleared its STOP bit.  NTP (NM 99-ntp-sync.sh) writes it.
+
+case "$1" in
+  start)
+    [ -e /dev/rtc1 ] && hwclock -s -u -f /dev/rtc1 2>/dev/null
+    ;;
+esac
+exit 0

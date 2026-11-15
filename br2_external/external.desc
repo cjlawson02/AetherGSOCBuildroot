@@ -1,2 +1,2 @@
-name: X6100
-desc: Built-from-source Buildroot image for the Xiegu X6100
+name: GSOC
+desc: Built-from-source Buildroot image for the Xiegu GSOC (Allwinner A20)

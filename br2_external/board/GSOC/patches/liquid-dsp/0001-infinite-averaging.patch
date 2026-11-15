@@ -1,0 +1,16 @@
+liquid-dsp: spgram: scale 1, not 0, without accumulation (infinite averaging)
+
+From the X6100 tree's patch for liquid-dsp, rebased onto 1.6.0 (spgram.c is
+spgram.proto.c there).
+
+--- a/src/fft/src/spgram.proto.c	2026-11-14 13:21:48
++++ b/src/fft/src/spgram.proto.c	2026-11-14 13:21:48
+@@ -452,7 +452,7 @@
+     // compute magnitude (linear) and run FFT shift
+     unsigned int i;
+     unsigned int nfft_2 = _q->nfft / 2;
+-    T scale = _q->accumulate ? 1.0f / max(1,_q->num_transforms) : 0.0f;
++    T scale = _q->accumulate ? 1.0f / max(1,_q->num_transforms) : 1.0f;
+     // TODO: adjust scale if infinite integration
+     for (i=0; i<_q->nfft; i++) {
+         unsigned int k = (i + nfft_2) % _q->nfft;

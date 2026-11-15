@@ -1,0 +1,104 @@
+#!/bin/sh
+# The rtw88_8821cu USB dongle sometimes wedges a few seconds after boot: every
+# register access fails with -71, then "failed to download firmware" / "mac power
+# on failed", and only a replug brings it back (gsoc-open NEEDS-HARDWARE G18).
+# For the first minutes after boot, if that happens and wlan0 is not connected,
+# re-enumerate the dongle (authorized 0 -> 1), then if needed rebind its USB host
+# controller. The GUI is stopped around the reset: it crashes when the Wi-Fi
+# device disappears (libnm). Every step is logged to GSOC-BOOT gsoc-log/.
+
+WATCH_S=240
+LOG=/boot/gsoc-log/wifi$(cat /run/gsoc-boot-n 2>/dev/null).txt
+
+log() {
+    echo "$(cut -d' ' -f1 /proc/uptime) $*" >>"$LOG"
+}
+
+wedged() {
+    dmesg | grep -q -E 'rtw88_8821cu .*(failed with -71|status: -71|mac power on failed|failed to download firmware)'
+}
+
+connected() {
+    [ "$(nmcli -t -f DEVICE,STATE dev 2>/dev/null | sed -n 's/^wlan0://p')" = connected ]
+}
+
+# The dongle's USB device (e.g. 2-1): bound to the driver, or else by its id, for a wedge at the
+# first probe (the driver never bound: boot 36)
+DONGLE_ID=0bda:c820
+dongle() {
+    for i in /sys/bus/usb/drivers/rtw88_8821cu/*:*; do
+        [ -e "$i" ] && basename "$i" | cut -d: -f1 && return
+    done
+    for d in /sys/bus/usb/devices/*; do
+        [ "$(cat "$d/idVendor" 2>/dev/null):$(cat "$d/idProduct" 2>/dev/null)" = "$DONGLE_ID" ] &&
+            basename "$d" && return
+    done
+}
+
+wait_connected() {
+    n=0
+    while [ "$n" -lt "$1" ]; do
+        connected && return 0
+        sleep 1
+        n=$((n + 1))
+    done
+    return 1
+}
+
+watch() {
+    t=0
+    while [ "$t" -lt "$WATCH_S" ]; do
+        if wedged && ! connected; then
+            break
+        fi
+        sleep 5
+        t=$((t + 5))
+    done
+    [ "$t" -lt "$WATCH_S" ] || exit 0
+
+    dev=$(dongle)
+    log "wedged: dongle=${dev:-none}"
+    dmesg | grep -E 'rtw88|usb [0-9]-' | grep -v reg_sec | tail -8 >>"$LOG"
+    gui=0
+    if pidof x6100_gui >/dev/null; then
+        gui=1
+        /etc/init.d/S60gsoc-gui stop >/dev/null 2>&1
+        log "gui stopped"
+    fi
+
+    if [ -n "$dev" ]; then
+        echo 0 >"/sys/bus/usb/devices/$dev/authorized"
+        sleep 2
+        echo 1 >"/sys/bus/usb/devices/$dev/authorized"
+        log "step 1: $dev re-authorized"
+        if wait_connected 60; then
+            log "step 1: connected"
+        else
+            hc=$(readlink -f "/sys/bus/usb/devices/$dev" | sed -n 's|.*/\([0-9a-f]*\.usb\)/.*|\1|p')
+            drv=$(basename "$(readlink -f "/sys/bus/platform/devices/$hc/driver")")
+            log "step 1: not connected; step 2: rebind $hc ($drv)"
+            echo "$hc" >"/sys/bus/platform/drivers/$drv/unbind"
+            sleep 2
+            echo "$hc" >"/sys/bus/platform/drivers/$drv/bind"
+            if wait_connected 90; then
+                log "step 2: connected"
+            else
+                log "step 2: not connected"
+            fi
+        fi
+    fi
+    dmesg | grep -E 'rtw88|usb [0-9]-' | grep -v reg_sec | tail -8 >>"$LOG"
+
+    if [ "$gui" = 1 ]; then
+        /etc/init.d/S60gsoc-gui start >/dev/null 2>&1
+        log "gui started"
+    fi
+    sync
+}
+
+case "$1" in
+  start)
+    watch </dev/null >/dev/null 2>&1 &
+    ;;
+esac
+exit 0

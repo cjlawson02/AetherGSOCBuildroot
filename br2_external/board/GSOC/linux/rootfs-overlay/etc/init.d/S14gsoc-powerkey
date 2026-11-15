@@ -1,0 +1,39 @@
+#!/bin/sh
+# P (power) button: the AXP209 power key (axp20x-pek, KEY_POWER).  Nothing
+# else listens on BusyBox init (Armbian had systemd-logind), so a short press
+# powers off here, as on the leave system.  The flag tells S59gsoc-g90-body to
+# shut the radio body down too.
+
+PIDFILE=/run/gsoc-powerkey.pid
+
+pek_event() {
+  for d in /sys/class/input/event*; do
+    [ "$(cat "$d/device/name" 2>/dev/null)" = axp20x-pek ] && echo "/dev/input/${d##*/}" && return
+  done
+}
+
+watch_key() {
+  evtest "$1" 2>/dev/null | while read -r line; do
+    case "$line" in
+      *"(KEY_POWER), value 1"*)
+        logger -t gsoc-powerkey "power key: poweroff"
+        touch /run/gsoc-poweroff
+        poweroff
+        ;;
+    esac
+  done
+}
+
+case "$1" in
+  start)
+    dev=$(pek_event)
+    [ -n "$dev" ] || exit 0
+    watch_key "$dev" &
+    echo $! >"$PIDFILE"
+    ;;
+  stop)
+    [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+    rm -f "$PIDFILE"
+    ;;
+esac
+exit 0

@@ -1,5 +1,5 @@
-# Base image (last LTS)
-FROM ubuntu:latest
+# Debian 12 host (GCC 12), the one the GSOC image is built and tested on.
+FROM debian:bookworm
 
 # Set apt-get to non-interactive
 ARG DEBIAN_FRONTEND=noninteractive
@@ -11,12 +11,12 @@ RUN apt-get update && apt-get upgrade -y
 
 # Set the correct locale
 RUN apt-get install -y locales
-RUN localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+RUN localedef -i en_US -c -f UTF-8 en_US.UTF-8
 ENV LANG en_US.utf8
 
 # Install dependencies (but not asciidoc because it wants to install LaTeX)
-RUN apt-get install -y git build-essential wget cpio unzip rsync bc \
-    libncurses5 libncurses5-dev libncursesw5-dev screen file cmake \
+RUN apt-get install -y git build-essential wget cpio unzip rsync bc flex bison \
+    libncurses-dev screen file cmake \
     python3 python3-dev python3-setuptools python3-pip
 
 # Make a working dir
